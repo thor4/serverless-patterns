@@ -1,1 +1,5 @@
 pytest==6.2.5
+hypothesis>=6.0.0
+moto>=4.0.0
+pytest-mock>=3.0.0
+aws-lambda-powertools>=2.0.0

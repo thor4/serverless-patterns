@@ -67,12 +67,20 @@ class ApigwHttpApiLambdaDynamodbPythonCdkStack(Stack):
             ),
         )
 
+        # Lambda Powertools Layer ARN (region-specific)
+        # Using Python 3.10 compatible layer (CDK 2.77.0 max supported Lambda runtime)
+        powertools_layer = lambda_.LayerVersion.from_layer_version_arn(
+            self,
+            "PowertoolsLayer",
+            layer_version_arn=f"arn:aws:lambda:{self.region}:017000801446:layer:AWSLambdaPowertoolsPythonV3-python310-x86_64:7"
+        )
+
         # Create the Lambda function to receive the request
         api_hanlder = lambda_.Function(
             self,
             "ApiHandler",
             function_name="apigw_handler",
-            runtime=lambda_.Runtime.PYTHON_3_14,
+            runtime=lambda_.Runtime.PYTHON_3_10,
             code=lambda_.Code.from_asset("lambda/apigw-handler"),
             handler="index.handler",
             vpc=vpc,
@@ -81,15 +89,31 @@ class ApigwHttpApiLambdaDynamodbPythonCdkStack(Stack):
             ),
             memory_size=1024,
             timeout=Duration.minutes(5),
+            layers=[powertools_layer],
+            tracing=lambda_.Tracing.ACTIVE,
+            environment={
+                "TABLE_NAME": demo_table.table_name,
+                "POWERTOOLS_SERVICE_NAME": "serverless-api",
+                "POWERTOOLS_METRICS_NAMESPACE": "ServerlessApp",
+                "LOG_LEVEL": "INFO",
+            },
         )
 
         # grant permission to lambda to write to demo table
         demo_table.grant_write_data(api_hanlder)
-        api_hanlder.add_environment("TABLE_NAME", demo_table.table_name)
+        # Grant DynamoDB describe permissions for health checks
+        demo_table.grant(api_hanlder, "dynamodb:DescribeTable")
 
-        # Create API Gateway
-        apigw_.LambdaRestApi(
+        # Create API Gateway with X-Ray tracing
+        api = apigw_.LambdaRestApi(
             self,
             "Endpoint",
             handler=api_hanlder,
+            deploy_options=apigw_.StageOptions(
+                tracing_enabled=True,
+            ),
         )
+
+        # Add /health endpoint
+        health_resource = api.root.add_resource("health")
+        health_resource.add_method("GET")
